@@ -41,6 +41,7 @@ void setup() {
   Serial.println("Acceleration in G's");
   Serial.println("X\tY\tZ");  
 }
+char userInput;
 float tm = 1/99.84;
 float degx= 0;
 float degy = 0;
@@ -90,14 +91,23 @@ void loop() {
     
     degt=kg*degx+ka*degacc;
     
-    Serial.print(degacc);
-    Serial.print('\t');
-    Serial.print(degx);
-    Serial.print('\t');
+    if(Serial.available()> 0){ 
+    
+    userInput = Serial.read();               // read user input
+      
+      if(userInput == 'g'){                  // if we get expected value 
+          Serial.println(degt);
+      }
+    }       
+
+    //Serial.print(degacc);
+    //Serial.print('\t');
+    //Serial.print(degx);
+    //Serial.print('\t');
     //Serial.print(degy);
     //Serial.print('\t');
     //Serial.println(degz);
-    Serial.println(degt);
+    
   }
 
 }
