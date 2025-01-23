@@ -22,7 +22,7 @@ def animate(i, dataList, ser):
     ax.clear()                                          # Clear last data frame
     ax.plot(dataList)                                   # Plot new data frame
     
-    ax.set_ylim([-100, 1-0])                              # Set Y axis limit of plot
+    ax.set_ylim([-100, 100])                              # Set Y axis limit of plot
     ax.set_title("Arduino Data")                        # Set title of figure
     ax.set_ylabel("Value")                              # Set title of y axis 
 
