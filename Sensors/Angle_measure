@@ -1,0 +1,103 @@
+/*
+  Arduino BMI270 - Simple Gyroscope
+
+  This example reads the gyroscope values from the BMI270
+  sensor and continuously prints them to the Serial Monitor
+  or Serial Plotter.
+
+  The circuit:
+  - Arduino Nano 33 BLE Sense Rev2
+
+  created 10 Jul 2019
+  by Riccardo Rizzo
+
+  This example code is in the public domain.
+*/
+
+#include "math.h"
+#include "Arduino_BMI270_BMM150.h"
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);
+  Serial.println("Started");
+
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+    while (1);
+  }
+  Serial.print("Gyroscope sample rate = ");
+  Serial.print(IMU.gyroscopeSampleRate());
+  Serial.println(" Hz");
+  Serial.println();
+  Serial.println("Gyroscope in degrees/second");
+  Serial.println("X\tY\tZ");
+
+
+  Serial.print("Accelerometer sample rate = ");
+  Serial.print(IMU.accelerationSampleRate());
+  Serial.println(" Hz");
+  Serial.println();
+  Serial.println("Acceleration in G's");
+  Serial.println("X\tY\tZ");  
+}
+float tm = 1/99.84;
+float degx= 0;
+float degy = 0;
+float degz= 0;
+float degacc= 0;
+float degt = 0;
+float kg= 0.5; //gyroscope weight
+float ka= 0.5; //accelerometer weight
+
+
+
+void loop() {
+  float x, y, z,ax,ay,az;
+
+
+  if (IMU.gyroscopeAvailable()) {
+    IMU.readGyroscope(x, y, z);
+
+    degx = degt + x*tm ;
+    degy = degy + y*tm ;
+    degz = degz + z*tm;
+    
+  }
+  
+// Accelerometer
+    if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(ax, ay, az);
+
+
+    /*Serial.print(ax);
+    Serial.print('\t');
+    Serial.print(ay);
+    Serial.print('\t');
+    Serial.println(az);
+    Serial.print(tm);
+    Serial.print('\t');
+    Serial.print(x);
+    Serial.print('\t');
+    Serial.print(y);
+    Serial.print('\t');
+    Serial.print(z);
+    Serial.print('\t');*/
+
+
+    
+    float degacc= atan(ay/az)*180/PI;
+    
+    degt=kg*degx+ka*degacc;
+    
+    Serial.print(degacc);
+    Serial.print('\t');
+    Serial.print(degx);
+    Serial.print('\t');
+    //Serial.print(degy);
+    //Serial.print('\t');
+    //Serial.println(degz);
+    Serial.println(degt);
+  }
+
+}
