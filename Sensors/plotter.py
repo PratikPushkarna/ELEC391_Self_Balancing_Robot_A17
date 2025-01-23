@@ -21,10 +21,15 @@ def animate(i, dataList, ser):
     
     ax.clear()                                          # Clear last data frame
     ax.plot(dataList)                                   # Plot new data frame
-    
-    ax.set_ylim([-100, 100])                              # Set Y axis limit of plot
-    ax.set_title("Arduino Data")                        # Set title of figure
-    ax.set_ylabel("Value")                              # Set title of y axis 
+
+    ax.set_ylim([-100, 100])                            # Set Y axis limit of plot
+    ax.set_title("Arduino Data")                      # Set title of figure
+    ax.set_ylabel("Value")                            # Set title of y axis 
+
+    # Display the latest value on the plot
+    if dataList:
+        ax.text(len(dataList) - 1, dataList[-1], f'{dataList[-1]:.2f}', color="red", fontsize=10, 
+                verticalalignment='bottom', horizontalalignment='right')
 
 dataList = []                                           # Create empty list variable for later use
                                                         
