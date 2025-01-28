@@ -96,7 +96,12 @@ void loop() {
     userInput = Serial.read();               // read user input
       
       if(userInput == 'g'){                  // if we get expected value 
-          Serial.println(degt);
+
+          Serial.print(degt);
+          Serial.print(",");
+          Serial.print(degx);
+          Serial.print(",");
+          Serial.println(degacc);
       }
     }       
 
