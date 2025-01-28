@@ -1,47 +1,73 @@
-import serial
 
-import time
+
 import serial
+import time
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-def animate(i, dataList, ser):
-    ser.write(b'g')                                     # Transmit the char 'g' to receive the Arduino data point
-    arduinoData_string = ser.readline().decode('ascii') # Decode receive Arduino data as a formatted string
-    #print(i)                                           # 'i' is a incrementing variable based upon frames = x argument
+# Function to update the plot
+def animate(i, dataLists, ser, legend_texts):
+    ser.write(b'g')  # Send 'g' to Arduino to trigger data transmission
+    arduinoData_string = ser.readline().decode('ascii').strip()  # Read and decode the data
 
     try:
-        arduinoData_float = float(arduinoData_string)   # Convert to float
-        dataList.append(arduinoData_float)              # Add to the list holding the fixed number of points to animate
+        # Expecting data in the format "degt,degx,degacc"
+        degt, degx, degacc = map(float, arduinoData_string.split(','))
+        
+        # Append new data to corresponding lists
+        dataLists[0].append(degt)
+        dataLists[1].append(degx)
+        dataLists[2].append(degacc)
+        
+        # Update the legend text with the current values
+        legend_texts[0] = f"degt (Weighted Angle): {degt:.2f}"
+        legend_texts[1] = f"degx (Gyroscope Angle): {degx:.2f}"
+        legend_texts[2] = f"degacc (Accelerometer Angle): {degacc:.2f}"
+        
+    except ValueError:
+        # Ignore if the data is not properly formatted
+        return
 
-    except:                                             # Pass if data point is bad                               
-        pass
+    # Keep the lists fixed to the last 50 data points
+    for dataList in dataLists:
+        dataList[:] = dataList[-50:]
 
-    dataList = dataList[-50:]                           # Fix the list size so that the animation plot 'window' is x number of points
-    
-    ax.clear()                                          # Clear last data frame
-    ax.plot(dataList)                                   # Plot new data frame
+    ax.clear()  # Clear previous plot
 
-    ax.set_ylim([-100, 100])                            # Set Y axis limit of plot
-    ax.set_title("Angle of the Arduino")                      # Set title of figure
-    ax.set_ylabel("Angle (Degrees)")                            # Set title of y axis 
+    # Plot each data list with labels
+    ax.plot(dataLists[0], label=legend_texts[0], color="blue")
+    ax.plot(dataLists[1], label=legend_texts[1], color="green")
+    ax.plot(dataLists[2], label=legend_texts[2], color="red")
 
-    # Display the latest value on the plot
-    if dataList:
-        ax.text(len(dataList) - 1, dataList[-1], f'{dataList[-1]:.2f}', color="red", fontsize=10, 
-                verticalalignment='bottom', horizontalalignment='right')
+    ax.set_ylim([-180, 180])  # Set Y-axis limits
+    ax.set_title("Real-time Angle Measurements")
+    ax.set_xlabel("Time (frames)")
+    ax.set_ylabel("Angle (Degrees)")
+    ax.legend(loc="upper right")  # Add legend to the plot
 
-dataList = []                                           # Create empty list variable for later use
-                                                        
-fig = plt.figure()                                      # Create Matplotlib plots fig is the 'higher level' plot window
-ax = fig.add_subplot(111)                               # Add subplot to main fig window
+# Initialize data lists for each value
+dataLists = [[], [], []]  # [degt_values, degx_values, degacc_values]
+legend_texts = [
+    "degt (Complimentary Angle): 0.00",
+    "degx (Gyroscope Angle): 0.00",
+    "degacc (Accelerometer Angle): 0.00"
+]
 
-ser = serial.Serial("COM5", 9600)                       # Establish Serial object with COM port and BAUD rate to match Arduino Port/rate
-time.sleep(2)                                           # Time delay for Arduino Serial initialization 
+# Set up the plot
+fig = plt.figure()
+ax = fig.add_subplot(111)
 
-                                                        # Matplotlib Animation Fuction that takes takes care of real time plot.
-                                                        # Note that 'fargs' parameter is where we pass in our dataList and Serial object. 
-ani = animation.FuncAnimation(fig, animate, frames=100, fargs=(dataList, ser), interval=100) 
+# Configure the serial port
+ser = serial.Serial("COM5", 9600)  # Update 'COM5' to match your Arduino port
+time.sleep(2)  # Wait for the Arduino to initialize
 
-plt.show()                                              # Keep Matplotlib plot persistent on screen until it is closed
-ser.close()                                             # Close Serial connection when plot is closed
+# Set up the animation function
+ani = animation.FuncAnimation(fig, animate, frames=100, fargs=(dataLists, ser, legend_texts), interval=10)
+
+# Show the plot
+plt.show()
+
+# Close the serial port after exiting
+ser.close()
+
+
