@@ -19,6 +19,15 @@ int left_2 = 3;                                                         // PWM f
 int right_1 = 4;                                                         // PWM from digital pin 4
 int right_2 = 5;                                                         // PWM from digital pin 5
 
+float tm = 1/99.84;
+    float degx= 0;
+    float degy = 0;
+    float degz= 0;
+    float degacc= 0;
+    float degt = 0;
+    float kg= 0.5; //gyroscope weight
+    float ka= 0.5; //accelerometer weight
+
 void setup() {
 
   pinMode(pwm_lf_button, INPUT_PULLUP);                               // Use INPUT_PULLUP if no external pull-down resistor
@@ -27,17 +36,18 @@ void setup() {
   pinMode(pwm_rb_button, INPUT_PULLUP);                               // Use INPUT_PULLUP if no external pull-down resistor
 
   Serial.begin(9600);                                                 // Initialize serial communication
+
+  while (!Serial);
+  Serial.println("Started");
+
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+    while (1);
+  }
 }
 
-float check_angle(){
-    float tm = 1/99.84;
-    float degx= 0;
-    float degy = 0;
-    float degz= 0;
-    float degacc= 0;
-    float degt = 0;
-    float kg= 0.5; //gyroscope weight
-    float ka= 0.5; //accelerometer weight
+void loop() {
+    float gyro_angle;
     float x, y, z,ax,ay,az;
 
     if (IMU.gyroscopeAvailable()) {
@@ -55,14 +65,7 @@ float check_angle(){
     
         degt=kg*degx+ka*degacc;
     }
-
-    return degt;
-}
-
-void loop() {
-    float gyro_angle;
-
-    gyro_angle = check_angle();
+    gyro_angle = degt;
 
     if(gyro_angle > 0){
         PWM_A = PWM_B = gyro_angle*255.0/90.0;
