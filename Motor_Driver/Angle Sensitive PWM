@@ -1,0 +1,153 @@
+// A17
+// Proof of Concepts demo
+
+#include "math.h"
+#include "Arduino_BMI270_BMM150.h"
+
+//Pin Declarations
+int pwm_lf_button = 6;                                               // Button to control PWM rate for Motor A
+int pwm_lb_button = 8;                                               // Button to control PWM rate for Motor B
+
+int pwm_rf_button = 10;                                              // Button to control PWM rate for Motor A
+int pwm_rb_button = 12;                                              // Button to control PWM rate for Motor B
+
+int left_1 = 2;                                                      // PWM from digital pin 2
+int left_2 = 3;                                                      // PWM from digital pin 3
+
+int right_1 = 4;                                                     // PWM from digital pin 4
+int right_2 = 5;                                                     // PWM from digital pin 5
+
+//Parameter Declarations
+
+float PWM_A = 0;                                                     // Initial PWM value A
+float PWM_B = 0;                                                     // Initial PWM value B
+
+void setup() {
+
+  pinMode(pwm_lf_button, INPUT_PULLUP);                              // Use INPUT_PULLUP if no external pull-down resistor
+  pinMode(pwm_lb_button, INPUT_PULLUP);                              
+  pinMode(pwm_rf_button, INPUT_PULLUP);                              
+  pinMode(pwm_rb_button, INPUT_PULLUP);
+
+  Serial.begin(9600);                                                // Initialize serial communication
+
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+    while (1);
+  }
+
+  Serial.print("Gyroscope sample rate = ");
+  Serial.println(IMU.gyroscopeSampleRate());
+}
+
+void loop() {
+
+  float TimeSample = 1/IMU.gyroscopeSampleRate();
+  float K_gy= 0.5;                                                     // Gyroscope weight
+  float K_acc= 0.5;                                                    // Accelerometer weight
+
+  float Tilt_Angle = 0;
+
+  float Gy_x, Gy_y, Gy_Z;
+  float w_x;
+
+  if (IMU.gyroscopeAvailable()) {
+
+    IMU.readGyroscope(Gy_x, Gy_y, Gy_Z);
+    w_x = Tilt_Angle + Gy_x*TimeSample;
+  }
+
+  float ax, ay, az;
+  float acc_x;
+
+  if (IMU.accelerationAvailable()) {
+
+    IMU.readAcceleration(ax, ay, az);
+    acc_x= atan(ay/az)*180/PI;
+  }
+
+  Tilt_Angle = -(K_gy*w_x + K_acc*acc_x)*2;
+
+  if ( (Tilt_Angle < 5) && (Tilt_Angle > -5 ) ) {
+
+    if (digitalRead(pwm_lf_button) == LOW) {
+
+      PWM_A += 255/4;                                                   // Increase PWM by 25%
+
+      if (PWM_A > 255) {
+
+        PWM_A = 0;                                                      // Cap at max PWM value
+      }
+    }
+
+    if (digitalRead(pwm_lb_button) == LOW) {
+
+      PWM_A -= 255/4;                                                   // Increase PWM by 25%
+
+      if (PWM_A < -255) {
+
+        PWM_A = 0;                                                      // Cap at max PWM value
+      }
+    }
+
+    if (digitalRead(pwm_rf_button) == LOW) {
+
+       PWM_B += 255/4;                                                   // Increase PWM by 25%
+
+      if (PWM_B > 255) {
+
+        PWM_B = 0;                                                      // Cap at max PWM value
+      }
+    }
+
+    if (digitalRead(pwm_rb_button) == LOW) {  
+
+      PWM_B -= 255/4;                                                   // Increase PWM by 25%
+
+      if (PWM_B < -255) {
+
+        PWM_B = 0;                                                      // Cap at max PWM value
+
+      }
+    }
+  }
+
+  else {
+
+     PWM_A = Tilt_Angle*255.0/90.0;
+     PWM_B = Tilt_Angle*255.0/90.0;
+  }
+
+  if ( PWM_A >= 0 ) {
+
+    analogWrite(left_1, PWM_A);
+    analogWrite(left_2, 0);
+  }
+
+  else {
+
+    analogWrite(left_1, 0);
+    analogWrite(left_2, abs(PWM_A));
+  }
+
+  if ( PWM_B >= 0 ) {
+
+    analogWrite(right_1, PWM_B);
+    analogWrite(right_2, 0);
+  }
+
+  else {
+
+    analogWrite(right_1, 0);
+    analogWrite(right_2, abs(PWM_B));
+  }
+
+  Serial.print("PWM_A Value: ");
+  Serial.print(PWM_A);
+  Serial.print("\tPWM_B Value: ");
+  Serial.print(PWM_B);
+  Serial.print("\tTilt Angle: ");
+  Serial.println(Tilt_Angle);
+
+  delay(200);                                                        // Delay for each serial monitor reading     
+}
