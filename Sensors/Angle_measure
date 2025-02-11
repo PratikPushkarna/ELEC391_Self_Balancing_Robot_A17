@@ -61,8 +61,6 @@ void loop() {
     IMU.readGyroscope(x, y, z);
 
     degx = degt + x*tm ;
-    degy = degy + y*tm ;
-    degz = degz + z*tm;
     
   }
   
