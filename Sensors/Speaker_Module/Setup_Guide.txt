@@ -1,0 +1,13 @@
+We have used DFP mini player alongside a 3V 4Ohm speaker. The circuit.png shows the circuit setup. 
+
+The following video was used as a reference for our setup :
+Best Way to Play Audio on Arduino! DFPlayer mini / MP3-TF-16p Tutorial - https://www.youtube.com/watch?v=7WiSeQxb1bU&list=LL&index=1 
+
+***NOTE***  We had to edit some parts of our code since the softwareserial.h file was not available for arduino nano sense ble 33, the edited code is present in our files 
+
+
+
+  
+***| Issues faced |***   
+1.  
+2. The volume changes from 0 - 30, it was barely audible at 8 or 9 volume, so we changed it to 30 and it fixed the issue. 
