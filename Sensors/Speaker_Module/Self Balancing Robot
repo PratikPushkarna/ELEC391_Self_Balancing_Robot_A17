@@ -1,0 +1,326 @@
+// A17
+// Self Balancing Robot
+
+#include "math.h"
+#include "Arduino_BMI270_BMM150.h"
+#include <ArduinoBLE.h>
+#include "DFRobotDFPlayerMini.h"
+
+#define BUFFER_SIZE 20
+
+#define DFPLAYER_RX 0                                                 // Nano 33 BLE Sense RX (connect to DFPlayer TX)
+#define DFPLAYER_TX 1                                                 // Nano 33 BLE Sense TX (connect to DFPlayer RX)
+
+#define TRIGGER_PIN 7                                                 // Define Trigger pin
+#define ECHO_PIN 6                                                    // Define Echo pin
+
+BLEService customService("00000000-5EC4-4083-81CD-A10B8D5CF6EC");    
+BLECharacteristic customCharacteristic("00000001-5EC4-4083-81CD-A10B8D5CF6EC", BLERead | BLEWrite | BLENotify, BUFFER_SIZE, false); // Define a custom BLE service and characteristic
+
+//Pin Declarations
+
+int left_1 = 2;                                                      // PWM from digital pin 2
+int left_2 = 3;                                                      // PWM from digital pin 3
+
+int right_1 = 4;                                                     // PWM from digital pin 4
+int right_2 = 5;                                                     // PWM from digital pin 5
+
+//Parameter Declarations
+
+float PWM_A = 0;                                                     // Initial PWM value A
+float PWM_B = 0;                                                     // Initial PWM value B
+
+float speed = 0.85;
+
+unsigned long previous_T = 0;                                        //Global Varibles for the PID
+float integral = 0;
+float previous_angle = 0;
+
+unsigned long timer_value = 0;
+
+DFRobotDFPlayerMini myDFPlayer;
+String line;
+char command;
+int pause = 1;
+int repeat = 0;
+
+int folder;
+int song;
+
+int beepfolder;
+int beepsong;
+
+void setup() {
+
+  Serial.begin(9600);                                               // Initialize serial communication
+
+  while(!Serial);
+  pinMode(LED_BUILTIN, OUTPUT);                                     // Connection Status
+
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+    while (1);
+  }
+
+  if (!BLE.begin()) {
+    Serial.println("Starting BLE failed!");
+    while (1);
+  }
+
+  Serial.print("Gyroscope sample rate = ");
+  Serial.println(IMU.gyroscopeSampleRate());
+
+  BLE.setLocalName("BLE-DEVICE-A17");                                                 // Set the device name and local name
+  BLE.setDeviceName("BLE-DEVICE-A17");
+
+  customService.addCharacteristic(customCharacteristic);                              // Add the characteristic to the service
+  BLE.addService(customService);                                                      // Add the service
+  customCharacteristic.writeValue("Waiting for data");                                // Set an initial value for the characteristic
+
+  BLE.advertise();                                                                    // Start advertising the service
+
+  Serial.println("Bluetooth® device active, waiting for connections...");
+
+  if (!myDFPlayer.begin(Serial1)) {  // Use Serial1 instead of SoftwareSerial
+    Serial.println(F("Not initialized:"));
+    while (true);
+  }
+
+  Serial.println(F("DFPlayer Mini module initialized!"));
+
+  myDFPlayer.setTimeOut(500);                                                         // Serial timeout 500ms
+  myDFPlayer.volume(7);                                                               // Volume 5
+  myDFPlayer.EQ(0);                                                                   // Normal equalization
+
+  pinMode(TRIGGER_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+}
+
+void loop() {
+
+  BLEDevice central = BLE.central();
+
+  char receivedString[100];
+
+  float Tilt_Angle = 0;
+
+  while (central.connected()) {
+
+    if (central) {                                                                        //Bluetooth Input
+
+      Serial.print("Connected to central: ");
+      Serial.println(central.address());
+      digitalWrite(LED_BUILTIN, HIGH);                                                   // Turn on LED to indicate connection                                                       // Keep running while connected
+
+      if (customCharacteristic.written()) {                                             // Check if the characteristic was written
+
+        int length = customCharacteristic.valueLength();                                // Get the length of the received data
+
+        const unsigned char* receivedData = customCharacteristic.value();               // Read the received data
+
+        if (length < sizeof(receivedString)) {
+
+          memcpy(receivedString, receivedData, length);
+          receivedString[length] = '\0';                                                // Null-terminate the string
+        }
+
+        Serial.print("Received data: ");                                                // Print the received data to the Serial Monitor
+        Serial.println(receivedString);
+
+        customCharacteristic.writeValue("Data received");                               // Optionally, respond by updating the characteristic's value
+
+        if (strcmp(receivedString, "F") == 0) {                                         //Forward button pressed
+
+          PWM_A = speed*255;
+          PWM_B = speed*255;
+        }
+
+        else if (strcmp(receivedString, "B") == 0) {                                   //Backward button pressed
+
+          PWM_A = -speed*255;
+          PWM_B = -speed*255;
+        }
+
+        else if (strcmp(receivedString, "R") == 0) {                                    //Right button pressed
+
+          PWM_A = 0;
+          PWM_B = speed*255;
+        }
+
+        else if (strcmp(receivedString, "L") == 0) {                                    //Left button pressed
+
+          PWM_A = speed*255;
+          PWM_B = 0;
+        }
+
+        else if (strcmp(receivedString, "A") == 0) {                                    //Pause/Play button pressed
+
+          pause++;
+
+          if ( pause == 0 ) {
+
+            myDFPlayer.playFolder(folder, song);
+          }
+
+          else if ( pause == 1 ) {
+
+            myDFPlayer.pause();
+          }
+        }
+
+        else if (strcmp(receivedString, "B") == 0) {                                   //Change Folder button pressed
+
+          folder++;
+
+          if (folder > 3) {
+
+            folder = 0;
+          }
+        }
+
+        else if (strcmp(receivedString, "C") == 0) {                                   //Change Song button pressed
+
+          song++;
+
+          if (song > 3) {
+
+            song = 0;
+          }
+        }
+
+        else if (strcmp(receivedString, "N") == 0) {
+
+          float TimeSample = 1/IMU.gyroscopeSampleRate();
+          float K_gy= 0.5;                                                     // Gyroscope weight
+          float K_acc= 0.5;                                                    // Accelerometer weight
+
+          float Gy_x, Gy_y, Gy_Z;
+          float w_x;
+
+          if (IMU.gyroscopeAvailable()) {
+
+            IMU.readGyroscope(Gy_x, Gy_y, Gy_Z);
+            w_x = Tilt_Angle + Gy_x*TimeSample;
+          }
+
+          float ax, ay, az;
+          float acc_x;
+
+          if (IMU.accelerationAvailable()) {
+
+            IMU.readAcceleration(ax, ay, az);
+            acc_x= atan(ay/az)*180/PI;
+          }
+
+          Tilt_Angle = -(K_gy*w_x + K_acc*acc_x)*2;
+        
+          float wanted_angle = 0;
+
+          if (millis()-timer_value>10) {
+
+            timer_value = millis();
+
+            PWM_A = PWM_B = PID(Tilt_Angle, wanted_angle);
+          }
+        }
+
+        else {
+
+          Serial.print("receivedString has other data\t");
+          Serial.println(receivedString);
+        }
+
+        float distance = getDistance();
+
+        if (distance < 10) {
+
+          myDFPlayer.playFolder(beepfolder, beepsong);
+        }
+
+        else {
+
+          myDFPlayer.stop();
+        }
+
+        if ( PWM_A >= 0 ) {
+
+          analogWrite(left_1, PWM_A);
+          analogWrite(left_2, 0);
+        }
+
+        else {
+
+          analogWrite(left_1, 0);
+          analogWrite(left_2, abs(PWM_A));
+        }
+
+        if ( PWM_B >= 0 ) {
+
+          analogWrite(right_1, PWM_B);
+          analogWrite(right_2, 0);
+        }
+
+        else {
+
+          analogWrite(right_1, 0);
+          analogWrite(right_2, abs(PWM_B));
+        }
+
+        Serial.print("PWM_A Value: ");
+        Serial.print(PWM_A);
+        Serial.print("\tPWM_B Value: ");
+        Serial.print(PWM_B);
+        Serial.print("\tTilt Angle: ");
+        Serial.println(Tilt_Angle);
+
+        delay(500);                                                        // Delay for each serial monitor reading
+      }
+    }
+  }
+}
+
+int PID (float Tilt_Angle, float wanted_angle) {
+
+  float Kp = 2.2;
+  float Ki = 10;
+  float Kd = 0.019;
+  int Max_PID = 255;
+
+  float current_T = millis();
+  float dT = current_T - previous_T;
+  previous_T = current_T;
+
+  float error = wanted_angle - Tilt_Angle;
+
+  integral += error * dT;
+
+  float derivative = (previous_angle-Tilt_Angle)/dT;
+  previous_angle = Tilt_Angle;
+
+  int result = (Kp * error) + (Ki * integral) + (Kd * derivative);
+
+  if(result > Max_PID) {
+
+      result = Max_PID;
+  }
+  
+  else if (result < -Max_PID) {
+
+      result = Max_PID;
+  }
+  return result;
+}
+
+float getDistance() {                                                       // Send a short pulse to trigger the ultrasonic sensor
+    
+    digitalWrite(TRIGGER_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIGGER_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIGGER_PIN, LOW);
+    
+    long duration = pulseIn(ECHO_PIN, HIGH);                                // Read the time it takes for the echo to return
+    float distance = (duration * 0.0343) / 2;                               // Convert time to distance (Speed of sound is ~343 m/s or 0.0343 cm/us)
+
+    return distance;
+}
