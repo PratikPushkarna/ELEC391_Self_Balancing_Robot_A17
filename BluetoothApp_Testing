@@ -247,8 +247,8 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                     const SizedBox(width: 10),
                     ElevatedButton(
-                      onPressed: _isConnected ? () => _sendCommand('B') : null,
-                      child: const Text('B'),
+                      onPressed: _isConnected ? () => _sendCommand('B2') : null,
+                      child: const Text('B2'),
                     ),
                     const SizedBox(width: 10),
                     ElevatedButton(
