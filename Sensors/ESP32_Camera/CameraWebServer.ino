@@ -37,7 +37,7 @@
 // Enter your WiFi credentials
 // ===========================
 const char *ssid = "ubcsecure";
-const char *password = "Grover@1002";
+const char *password = "password";
 
 void startCameraServer();
 void setupLedFlash(int pin);
@@ -134,7 +134,7 @@ void setup() {
 #endif
 
   //WiFi.begin(ssid, password);
-  WiFi.begin(ssid, WPA2_AUTH_PEAP, "vivi1002", "vivi1002", password);
+  WiFi.begin(ssid, WPA2_AUTH_PEAP, "example", "example", password);
   WiFi.setSleep(false);
 
   Serial.print("WiFi connecting");
