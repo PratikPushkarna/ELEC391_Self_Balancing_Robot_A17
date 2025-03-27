@@ -7,8 +7,6 @@
 #include "DFRobotDFPlayerMini.h"
 #include <Servo.h>
 
-Servo myservo;  // create servo object to control a servo
-
 #define BUFFER_SIZE 20
 
 #define DFPLAYER_RX 0                                                 // Nano 33 BLE Sense RX (connect to DFPlayer TX)
@@ -19,12 +17,11 @@ Servo myservo;  // create servo object to control a servo
 //define PWM_RIGHT1 4                                                 // PWM Right Wheel 1 from digital pin 4
 //define PWM_RIGHT2 5                                                 // PWM Right Wheel 2 from digital pin 5
 
-#define TRIGGER_PIN 7                                                 // Define Trigger pin
-#define ECHO_PIN 6                                                    // Define Echo pin
+#define TRIGGER_PIN 6                                                 // Define Trigger pin
+#define ECHO_PIN 7                                                    // Define Echo pin
 
-#define SERVO_PIN = 9;                                                // Define Servo Pin
+#define SERVO_PIN 9                                                   // Define Servo Pin
 
-DFRobotDFPlayerMini myDFPlayer;
 
 BLEService customService("00000000-5EC4-4083-81CD-A10B8D5CF6EC");    
 BLECharacteristic customCharacteristic("00000001-5EC4-4083-81CD-A10B8D5CF6EC", BLERead | BLEWrite | BLENotify, BUFFER_SIZE, false); // Define a custom BLE service and characteristic
@@ -51,19 +48,23 @@ float previous_angle = 0;
 
 unsigned long timer_value = 0;
 
+Servo myservo;  // create servo object to control a servo
 int pos = 0;                                                         // variable to store the servo position
 
-/*DFRobotDFPlayerMini myDFPlayer;
-String line;
-char command;
-int pause = 1;
-int repeat = 0;
+DFRobotDFPlayerMini myDFPlayer;
+//String line;
+//char command;
+//int pause = 1;
+//int repeat = 0;
 
-int folder;
-int song;
+int folder=1;
+int song=0;
 
-int beepfolder;
-int beepsong;*/
+//int beepfolder;
+//int beepsong;
+
+float distance = 0 ;
+float temp = 0;
 
 
 void setup() {
@@ -111,10 +112,10 @@ void setup() {
 
   Serial.println(F("DFPlayer Mini module initialized!"));
   myDFPlayer.setTimeOut(500);
-  myDFPlayer.volume(25);
+  myDFPlayer.volume(28);
   myDFPlayer.EQ(0);
 
-  myservo.attach(servo_pin);
+  myservo.attach(SERVO_PIN);
   Serial.println(F("Servo Initialised"));
   
   //myDFPlayer.play(currentTrack);
@@ -128,13 +129,22 @@ void loop() {
   char receivedString[100];
 
   float Tilt_Angle = 0;
-
   if (central) { 
 
     while (central.connected()) {                                                       //Bluetooth Input
 
     //  Serial.print("Connected to central: ");
     //  Serial.println(central.address());
+
+      temp = getDistance();
+
+      if (temp>0){
+        distance = temp;
+      }
+      
+      Serial.print("Distance Value in cm: ");
+      Serial.println(distance);
+
       digitalWrite(LED_BUILTIN, HIGH);                                                  // Turn on LED to indicate connection                                                       // Keep running while connected
 
       if (customCharacteristic.written()) {                                             // Check if the characteristic was written
@@ -159,7 +169,7 @@ void loop() {
           PWM_A = speed*255;
           PWM_B = speed*255;
 
-          strcpy(commandString, "N");
+          //strcpy(commandString, "N");
         }
 
         else if (strcmp(receivedString, "B") == 0) {                                   //Backward button pressed
@@ -167,14 +177,14 @@ void loop() {
           PWM_A = -speed*255;
           PWM_B = -speed*255;
           
-          strcpy(commandString, "N");
+          //strcpy(commandString, "N");
         }
 
         else if (strcmp(receivedString, "R") == 0) {                                    //Right button pressed
 
           PWM_A = 0;
           PWM_B = speed*255;
-          
+          //
           strcpy(commandString, "N");
         }
 
@@ -183,12 +193,18 @@ void loop() {
           PWM_A = speed*255;
           PWM_B = 0;
           
-          strcpy(commandString, "N");
+          //strcpy(commandString, "N");
         }
 
         else if (strcmp(receivedString, "A") == 0) {         
           
-          myDFPlayer.playFolder(1, 1);                           
+            
+          song++;          
+          if (song > 3) {
+
+            song = 1;        
+          }  
+          myDFPlayer.playFolder(1, song);     
           //Pause/Play button pressed
 
           /*pause++;
@@ -206,10 +222,12 @@ void loop() {
           strcpy(commandString, "N");
         }
 
-        else if (strcmp(receivedString, "B") == 0) {                                   //Change Folder button pressed
+        else if (strcmp(receivedString, "B2") == 0) {                                   //Change Folder button pressed
 
+
+          song = 0;
           /*folder++;
-
+          
           if (folder > 3) {
 
             folder = 0;
@@ -226,6 +244,11 @@ void loop() {
 
             song = 0;
           }*/
+          pos+=45;
+          if (pos > 180) {
+            pos = 0;        
+          }  
+          myservo.write(pos);
           
           strcpy(commandString, "N");
         }
@@ -272,17 +295,18 @@ void loop() {
           Serial.println(receivedString);
         }
 
-        float distance = getDistance();
+       // distance = getDistance();                               // not working possibly due to delays and same timers which stops bluetooth after one reading
 
         if (distance < 10) {
 
-          myDFPlayer.playFolder(1, 2);
+          //myDFPlayer.playFolder(1, 2);
+          song++;
         }
 
-        else {
+        /*else {
 
           myDFPlayer.stop();
-        }
+        }*/
 
         if ( PWM_A >= 0 ) {
 
@@ -312,6 +336,12 @@ void loop() {
         Serial.print(PWM_A);
         Serial.print("\tPWM_B Value: ");
         Serial.print(PWM_B);
+        Serial.print("song Value: ");
+        Serial.print(song);
+        Serial.print("pos Value: ");
+        Serial.print(pos);
+        Serial.print("Distance Value in cm: ");
+        Serial.print(distance);
         Serial.print("\tTilt Angle: ");
         Serial.println(Tilt_Angle);
 
@@ -353,6 +383,41 @@ int PID (float Tilt_Angle, float wanted_angle) {
   return result;
 }
 
+/**
+ * Custom pulseIn function replacement (portable version)
+ * 
+ * @param pin The pin number to read pulses from
+ * @param state The pulse state to measure (HIGH or LOW)
+ * @param timeout The maximum time to wait for the pulse in microseconds (default 1 second)
+ * @return The pulse duration in microseconds, or 0 if timeout occurred
+ */
+unsigned long customPulseIn(uint8_t pin, uint8_t state, unsigned long timeout = 1000000UL) {
+    // Normalize state to HIGH or LOW
+    state = (state == HIGH) ? HIGH : LOW;
+    
+    unsigned long startMicros = micros();
+    unsigned long maxMicros = startMicros + timeout;
+    
+    // Wait for any previous pulse to end
+    while (digitalRead(pin) == state) {
+        if (micros() > maxMicros) return 0;
+    }
+    
+    // Wait for the pulse to start
+    while (digitalRead(pin) != state) {
+        if (micros() > maxMicros) return 0;
+    }
+    
+    unsigned long pulseStart = micros();
+    
+    // Wait for the pulse to end
+    while (digitalRead(pin) == state) {
+        if (micros() > maxMicros) return 0;
+    }
+    
+    return micros() - pulseStart;
+}
+
 float getDistance() {                                                       // Send a short pulse to trigger the ultrasonic sensor
     
     digitalWrite(TRIGGER_PIN, LOW);
@@ -361,9 +426,17 @@ float getDistance() {                                                       // S
     delayMicroseconds(10);
     digitalWrite(TRIGGER_PIN, LOW);
     
-    long duration = pulseIn(ECHO_PIN, HIGH);                                // Read the time it takes for the echo to return
+    //long duration = pulseIn(ECHO_PIN, HIGH, 10000);                                // Read the time it takes for the echo to return
+
+    //long duration = 1;                                // commenting out the PulseIn function and using this as an example makes the whole thing work
+
+    long duration = customPulseIn (ECHO_PIN, HIGH, 10000);
     float distance = (duration * 0.0343) / 2;                               // Convert time to distance (Speed of sound is ~343 m/s or 0.0343 cm/us)
 
     return distance;
+    
+    
+    
 }
+
 
