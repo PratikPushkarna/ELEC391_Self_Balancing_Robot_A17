@@ -110,7 +110,7 @@ void loop() {
     while (central.connected()) {                                                       //Bluetooth Input
 
         float gyro_angle;
-        float wanted_angle = -0.9;
+        float wanted_angle = -0.5;
 
         float x, y, z,ax,ay,az;
         float kg = 0.9; //gyroscope weight
@@ -143,9 +143,17 @@ void loop() {
 
          result = (kp * error) + (ki * integral) + (kd * derivative);
 
-            /*if( -1.3<error && error<1.3){
-              error=0;
+            /*if( error<-20 || error>20){
+              result=0;
+            }
+
+            if( error>-1.3 && error<1.3){
+              result =(ki * integral) + (kd * derivative);
             }*/
+
+            if( error>-1.3 && error<1.3){
+              result =(ki * integral) + (kd * derivative);
+            }
 
 
             if(result > Max_PID){
@@ -222,14 +230,19 @@ void loop() {
         else if (strcmp(receivedString, "B2") == 0) {                                   //Change Folder button pressed
 
 
-          kd = kd - 0.04;
+          kd = kd - 0.02;
           strcpy(commandString, "N");
         }
 
         else if (strcmp(receivedString, "C") == 0) {                                   //Change Song button pressed
 
-          kd = 0.39;
-          kp = 17;
+          kd=kd+1; ;
+          
+          if (kd>20){
+
+              kd=0;
+
+          }
           
           strcpy(commandString, "N");
         }
