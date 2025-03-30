@@ -1,11 +1,12 @@
 // A17
 // Self Balancing Robot
-//Change the PID code if needed
 
-
+#include <ArduinoBLE.h>
+#include <Wire.h>
+#include <AS5600.h>
 #include "math.h"
 #include "Arduino_BMI270_BMM150.h"
-#include <ArduinoBLE.h>
+#include "string.h"
 
 #define BUFFER_SIZE 20
 
@@ -28,40 +29,55 @@ float PWM_B = 0;                                                     // Initial 
 
 float speed = 0.85;
 
-unsigned long previous_T = 0;                                        //Global Varibles for the PID
+char sendbuffer[100];
+
+float tm = 1/99.84;
+float degx= 0;
+float degy = 0;
+float degz= 0;
+float degacc= 0;
+float degt = 0;
+
+
+//Global Varibles for the PID
+float kp = 5.5;
+float ki = 0;
+float kd = 0;
+int Max_PID = 255;
+int result=0;
+
+unsigned long previous_T = 0;
 float integral = 0;
 float previous_angle = 0;
 
 unsigned long timer_value = 0;
 
+AS5600 as5600;  // Create an instance of the AS5600
 
-char sendbuffer[100];
+unsigned long lastTime[2] = {0, 0};
+uint16_t lastAngle[2] = {0, 0};
 
 
-float kp = 5.5;
-float ki = 0;
-float kd = 0;
-int Max_PID = 255;
 
 void setup() {
 
-  Serial.begin(9600);                                               // Initialize serial communication
+  //Serial.begin(9600);                                               // Initialize serial communication
 
-  while(!Serial);
+  //while(!Serial);
   pinMode(LED_BUILTIN, OUTPUT);                                     // Connection Status
 
   if (!IMU.begin()) {
-    Serial.println("Failed to initialize IMU!");
+    //Serial.println("Failed to initialize IMU!");
     while (1);
   }
 
   if (!BLE.begin()) {
-    Serial.println("Starting BLE failed!");
+    //Serial.println("Starting BLE failed!");
     while (1);
   }
 
-  Serial.print("Gyroscope sample rate = ");
-  Serial.println(IMU.gyroscopeSampleRate());
+  //Serial.print("Gyroscope sample rate = ");
+  //Serial.println(IMU.gyroscopeSampleRate());
 
   BLE.setLocalName("BLE-DEVICE-A17");                                                 // Set the device name and local name
   BLE.setDeviceName("BLE-DEVICE-A17");
@@ -72,7 +88,13 @@ void setup() {
 
   BLE.advertise();                                                                    // Start advertising the service
 
-  Serial.println("Bluetooth® device active, waiting for connections...");
+  //Serial.println("Bluetooth® device active, waiting for connections...");
+
+  //Setup for the motor pins
+  pinMode(left_1, OUTPUT);
+  pinMode(left_2, OUTPUT);
+  pinMode(right_1, OUTPUT);
+  pinMode(right_2, OUTPUT);
   
 }
 
@@ -87,92 +109,63 @@ void loop() {
 
     while (central.connected()) {                                                       //Bluetooth Input
 
-        float TimeSample = 1/IMU.gyroscopeSampleRate();
-        float K_gy= 0.5;                                                     // Gyroscope weight
-        float K_acc= 0.5;                                                    // Accelerometer weight
+        float gyro_angle;
+        float wanted_angle = -0.9;
 
-        float Gy_x, Gy_y, Gy_Z;
-        float w_x;
-
+        float x, y, z,ax,ay,az;
+        float kg = 0.5; //gyroscope weight
+        float ka = 0.5; //accelerometer weight
+        //Gyroscope
         if (IMU.gyroscopeAvailable()) {
-            IMU.readGyroscope(Gy_x, Gy_y, Gy_Z);
-            w_x = Tilt_Angle + Gy_x*TimeSample;
-          }
+          IMU.readGyroscope(x, y, z); 
+          degx = degt + x*tm ;
+        }
 
-          float ax, ay, az;
-          float acc_x;
+      // Accelerometer
 
-          if (IMU.accelerationAvailable()) {
+        if (IMU.accelerationAvailable()) {
+          IMU.readAcceleration(ax, ay, az);
+          float degacc= atan(ay/az)*180/PI;
+          
+          degt=kg*degx+ka*degacc;
+        }
 
-            IMU.readAcceleration(ax, ay, az);
-            acc_x= atan(ay/az)*180/PI;
-          }
+        float current_T = micros();
+        float dT = (current_T - previous_T)/1000000.0;
+        previous_T = current_T;
 
-          Tilt_Angle = -(K_gy*w_x + K_acc*acc_x)*2;
-        
-          float wanted_angle = 0;
+        float error = wanted_angle - degt;
 
-          if (millis()-timer_value>10) {
+        integral += error * dT;
+        integral = constrain(integral,-30.0,30.0);
 
-            timer_value = millis();
-            
+        float derivative = x;
 
-            float current_T = millis();
-            float dT = current_T - previous_T;
-            previous_T = current_T;
+         result = (kp * error) + (ki * integral) + (kd * derivative);
 
-            float error = wanted_angle - Tilt_Angle;
+            /*if( -1.3<error && error<1.3){
+              error=0;
+            }*/
 
-            integral += error * dT;
 
-            float derivative = (previous_angle-Tilt_Angle)/dT;
-            previous_angle = Tilt_Angle;
-
-            int result = (kp * error) + (ki * integral) + (kd * derivative);
-
-            if(result > Max_PID) {
-
-                result = Max_PID;
+            if(result > Max_PID){
+              result = Max_PID;
+            } else if(result < -Max_PID){
+              result = -Max_PID;
             }
-            
-            else if (result < -Max_PID) {
-
-                result = Max_PID;
+            if(result > 0){
+              PWM_A = PWM_B = result;
+              analogWrite(left_1, PWM_A);
+              analogWrite(left_2, 0);
+              analogWrite(right_1, PWM_B);
+              analogWrite(right_2, 0);
+            } else {
+              PWM_A = PWM_B = -result;
+              analogWrite(left_1, 0);
+              analogWrite(left_2, PWM_A);
+              analogWrite(right_1, 0);
+              analogWrite(right_2, PWM_B);
             }
-            PWM_A = PWM_B = result;
-          }
-        
-
-        else {
-
-          Serial.print("receivedString has other data\t");
-          Serial.println(receivedString);
-        }
-
-
-        if ( PWM_A >= 0 ) {
-
-          analogWrite(left_1, PWM_A);
-          analogWrite(left_2, 0);
-        }
-
-        else {
-
-          analogWrite(left_1, 0);
-          analogWrite(left_2, abs(PWM_A));
-        }
-
-        if ( PWM_B >= 0 ) {
-
-          analogWrite(right_1, PWM_B);
-          analogWrite(right_2, 0);
-        }
-
-        else {
-
-          analogWrite(right_1, 0);
-          analogWrite(right_2, abs(PWM_B));
-        }
 
 
       digitalWrite(LED_BUILTIN, HIGH);                                                  // Turn on LED to indicate connection                                                       // Keep running while connected
@@ -195,13 +188,13 @@ void loop() {
 
         if (strcmp(receivedString, "F") == 0) {                                         //Forward button pressed
 
-          kp = kp + 0.2;
+          kp = kp + 0.1;
           strcpy(commandString, "N");
         }
 
         else if (strcmp(receivedString, "B") == 0) {                                   //Backward button pressed
 
-          kp = kp - 0.2;
+          kp = kp - 0.1;
           
           strcpy(commandString, "N");
         }
@@ -221,7 +214,7 @@ void loop() {
 
         else if (strcmp(receivedString, "A") == 0) {         
           
-          kd = kd + 0.04;
+          kd = kd + 0.02;
           
           strcpy(commandString, "N");
         }
@@ -245,11 +238,18 @@ void loop() {
 
         
         }
+
+        else {
+
+          Serial.print("receivedString has other data\t");
+          Serial.println(receivedString);
+        }
+        
         sprintf(sendbuffer," %.2f  %.2f  %.2f", kp, kd, ki);
         customCharacteristic.writeValue(sendbuffer);                               // Optionally, respond by updating the characteristic's value
       }
 
-      
+      /*
         Serial.print("PWM_A Value: ");
         Serial.print(PWM_A);
         Serial.print("\tPWM_B Value: ");
@@ -263,7 +263,7 @@ void loop() {
         Serial.print("\tTilt Angle: ");
         Serial.println(Tilt_Angle);
       
-  
+      */
     }
   }
 }
