@@ -113,8 +113,8 @@ void loop() {
         float wanted_angle = -0.9;
 
         float x, y, z,ax,ay,az;
-        float kg = 0.5; //gyroscope weight
-        float ka = 0.5; //accelerometer weight
+        float kg = 0.9; //gyroscope weight
+        float ka = 0.1; //accelerometer weight
         //Gyroscope
         if (IMU.gyroscopeAvailable()) {
           IMU.readGyroscope(x, y, z); 
