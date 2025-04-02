@@ -1,0 +1,701 @@
+
+#******* turn on the bluetooth on your laptop 
+#*******  turn on the bluetooth on your laptop 
+#******* turn on the bluetooth on your laptop 
+
+
+
+
+import asyncio
+from bleak import BleakScanner, BleakClient
+import tkinter as tk
+from tkinter import ttk, scrolledtext
+from threading import Thread
+
+ARDUINO_NAME = "BLE"
+CUSTOM_SERVICE_UUID = "00000000-5EC4-4083-81CD-A10B8D5CF6EC"
+CUSTOM_CHARACTERISTIC_UUID = "00000001-5EC4-4083-81CD-A10B8D5CF6EC"
+
+class AsyncTaskRunner:
+    def __init__(self):
+        self.loop = asyncio.new_event_loop()
+        self.thread = Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+    
+    def _run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+    
+    def run_task(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+class BLEDashboard:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("BLE Device Controller")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        # BLE variables
+        self.client = None
+        self.devices = []
+        self.selected_device = None
+        self.is_connected = False
+        self.task_runner = AsyncTaskRunner()
+        
+        # Create UI
+        self.create_ui()
+        
+        # Bind keyboard events
+        self.setup_keyboard_bindings()
+        
+        # Start scanning
+        self.start_scanning()
+    
+    def create_ui(self):
+        # Status frame
+        status_frame = ttk.LabelFrame(self.root, text="Status", padding=10)
+        status_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.status_label = ttk.Label(status_frame, text="Initializing...")
+        self.status_label.pack(fill=tk.X)
+        
+        # Device selection frame
+        device_frame = ttk.LabelFrame(self.root, text="BLE Devices", padding=10)
+        device_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.device_combobox = ttk.Combobox(device_frame, state="readonly")
+        self.device_combobox.pack(fill=tk.X)
+        
+        # Connection buttons frame
+        button_frame = ttk.Frame(self.root, padding=10)
+        button_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.connect_button = ttk.Button(
+            button_frame, 
+            text="Connect", 
+            command=self.connect_to_device,
+            state=tk.DISABLED
+        )
+        self.connect_button.pack(side=tk.LEFT, expand=True)
+        
+        self.disconnect_button = ttk.Button(
+            button_frame, 
+            text="Disconnect", 
+            command=self.disconnect_from_device,
+            state=tk.DISABLED
+        )
+        self.disconnect_button.pack(side=tk.LEFT, expand=True)
+        
+        self.refresh_button = ttk.Button(
+            button_frame,
+            text="Refresh",
+            command=self.start_scanning
+        )
+        self.refresh_button.pack(side=tk.LEFT, expand=True)
+        
+        # Control buttons frame
+        control_frame = ttk.LabelFrame(self.root, text="Controls", padding=20)
+        control_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Arrow buttons
+        up_frame = ttk.Frame(control_frame)
+        up_frame.pack()
+        self.up_button = ttk.Button(
+            up_frame, 
+            text="↑ (kp+0.1)", 
+            command=lambda: self.send_command("F"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.up_button.pack()
+        
+        middle_frame = ttk.Frame(control_frame)
+        middle_frame.pack(pady=5)
+        self.left_button = ttk.Button(
+            middle_frame, 
+            text="← (kp-1)", 
+            command=lambda: self.send_command("L"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.left_button.pack(side=tk.LEFT, padx=5)
+        
+        self.down_button = ttk.Button(
+            middle_frame, 
+            text="↓ (kp-0.1)", 
+            command=lambda: self.send_command("B"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.down_button.pack(side=tk.LEFT, padx=5)
+        
+        self.right_button = ttk.Button(
+            middle_frame, 
+            text="→ (kp+1)", 
+            command=lambda: self.send_command("R"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.right_button.pack(side=tk.LEFT, padx=5)
+        
+        # First row of letter buttons (A, B, C, D)
+        row1_frame = ttk.Frame(control_frame)
+        row1_frame.pack(pady=5)
+        
+        self.a_button = ttk.Button(
+            row1_frame, 
+            text="A (kd+0.02)", 
+            command=lambda: self.send_command("A"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.a_button.pack(side=tk.LEFT, padx=5)
+        
+        self.b_button = ttk.Button(
+            row1_frame, 
+            text="B (kd-0.02)", 
+            command=lambda: self.send_command("B2"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.b_button.pack(side=tk.LEFT, padx=5)
+        
+        self.c_button = ttk.Button(
+            row1_frame, 
+            text="C (kd+1)", 
+            command=lambda: self.send_command("C"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.c_button.pack(side=tk.LEFT, padx=5)
+        
+        self.d_button = ttk.Button(
+            row1_frame, 
+            text="D (kd-1)", 
+            command=lambda: self.send_command("D"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.d_button.pack(side=tk.LEFT, padx=5)
+        
+        # Second row of letter buttons (E, F, G, H)
+        row2_frame = ttk.Frame(control_frame)
+        row2_frame.pack(pady=5)
+        
+        self.e_button = ttk.Button(
+            row2_frame, 
+            text="E (kg+0.1)", 
+            command=lambda: self.send_command("E"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.e_button.pack(side=tk.LEFT, padx=5)
+        
+        self.f_button = ttk.Button(
+            row2_frame, 
+            text="F (ki+10)", 
+            command=lambda: self.send_command("F2"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.f_button.pack(side=tk.LEFT, padx=5)
+        
+        self.g_button = ttk.Button(
+            row2_frame, 
+            text="G (ki-10)", 
+            command=lambda: self.send_command("G"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.g_button.pack(side=tk.LEFT, padx=5)
+        
+        self.h_button = ttk.Button(
+            row2_frame, 
+            text="H (ki+1)", 
+            command=lambda: self.send_command("H"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.h_button.pack(side=tk.LEFT, padx=5)
+        
+        # Third row of letter buttons (I, K, L, M)
+        row3_frame = ttk.Frame(control_frame)
+        row3_frame.pack(pady=5)
+        
+        self.i_button = ttk.Button(
+            row3_frame, 
+            text="I (ki-1)", 
+            command=lambda: self.send_command("I"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.i_button.pack(side=tk.LEFT, padx=5)
+        
+        self.k_button = ttk.Button(
+            row3_frame, 
+            text="K (wang+0.05)", 
+            command=lambda: self.send_command("K"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.k_button.pack(side=tk.LEFT, padx=5)
+        
+        self.l_button = ttk.Button(
+            row3_frame, 
+            text="L (wang-0.05)", 
+            command=lambda: self.send_command("L2"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.l_button.pack(side=tk.LEFT, padx=5)
+        
+        self.m_button = ttk.Button(
+            row3_frame, 
+            text="M (kf+0.5)", 
+            command=lambda: self.send_command("M"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.m_button.pack(side=tk.LEFT, padx=5)
+        
+        # Fourth row of letter buttons (N, O, P, Q)
+        row4_frame = ttk.Frame(control_frame)
+        row4_frame.pack(pady=5)
+        
+        self.n_button = ttk.Button(
+            row4_frame, 
+            text="N (kf-5)", 
+            command=lambda: self.send_command("N"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.n_button.pack(side=tk.LEFT, padx=5)
+        
+        self.o_button = ttk.Button(
+            row4_frame, 
+            text="O (kf+0.1)", 
+            command=lambda: self.send_command("O"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.o_button.pack(side=tk.LEFT, padx=5)
+        
+        self.p_button = ttk.Button(
+            row4_frame, 
+            text="P (kf-0.1)", 
+            command=lambda: self.send_command("P"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.p_button.pack(side=tk.LEFT, padx=5)
+        
+        self.q_button = ttk.Button(
+            row4_frame, 
+            text="Q (pwm+25)", 
+            command=lambda: self.send_command("Q"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.q_button.pack(side=tk.LEFT, padx=5)
+        
+        self.r_button = ttk.Button(
+            row4_frame, 
+            text="R (wia+0.5)", 
+            command=lambda: self.send_command("R2"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.r_button.pack(side=tk.LEFT, padx=5)
+        
+        # Fifth row of letter buttons (S, T, U, V, W)
+        row5_frame = ttk.Frame(control_frame)
+        row5_frame.pack(pady=5)
+        
+        self.s_button = ttk.Button(
+            row5_frame, 
+            text="S (wia-0.5)", 
+            command=lambda: self.send_command("S"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.s_button.pack(side=tk.LEFT, padx=5)
+        
+        self.t_button = ttk.Button(
+            row5_frame, 
+            text="T (wia+5)", 
+            command=lambda: self.send_command("T"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.t_button.pack(side=tk.LEFT, padx=5)
+        
+        self.u_button = ttk.Button(
+            row5_frame, 
+            text="U (via-5)", 
+            command=lambda: self.send_command("U"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.u_button.pack(side=tk.LEFT, padx=5)
+        
+        self.v_button = ttk.Button(
+            row5_frame, 
+            text="V (nra+0.05)", 
+            command=lambda: self.send_command("V"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.v_button.pack(side=tk.LEFT, padx=5)
+        
+        self.w_button = ttk.Button(
+            row5_frame, 
+            text="W (nra-0.05)", 
+            command=lambda: self.send_command("W"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.w_button.pack(side=tk.LEFT, padx=5)
+        
+        # Sixth row of letter buttons (X, Y, Z)
+        row6_frame = ttk.Frame(control_frame)
+        row6_frame.pack(pady=5)
+        
+        self.x_button = ttk.Button(
+            row6_frame, 
+            text="X (RST)", 
+            command=lambda: self.send_command("X"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.x_button.pack(side=tk.LEFT, padx=5)
+        
+        self.y_button = ttk.Button(
+            row6_frame, 
+            text="Y (N/A)", 
+            command=lambda: self.send_command("Y"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.y_button.pack(side=tk.LEFT, padx=5)
+        
+        self.z_button = ttk.Button(
+            row6_frame, 
+            text="Z (N/A)", 
+            command=lambda: self.send_command("Z"),
+            state=tk.DISABLED,
+            width=10
+        )
+        self.z_button.pack(side=tk.LEFT, padx=5)
+        
+        
+        # Instructions label
+        instructions = ttk.Label(
+            control_frame,
+            text="Use arrow keys for directions or letter keys for buttons",
+            font=('Helvetica', 10)
+        )
+        instructions.pack(pady=10)
+        
+        # Received data frame
+        received_frame = ttk.LabelFrame(self.root, text="Received Data", padding=10)
+        received_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        self.received_text = scrolledtext.ScrolledText(
+            received_frame,
+            height=5,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.received_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Clear button for received data
+        clear_button = ttk.Button(
+            received_frame,
+            text="Clear",
+            command=self.clear_received_data
+        )
+        clear_button.pack(side=tk.RIGHT, pady=5)
+        
+    
+    def clear_received_data(self):
+        """Clear the received data display."""
+        self.received_text.config(state=tk.NORMAL)
+        self.received_text.delete(1.0, tk.END)
+        self.received_text.config(state=tk.DISABLED)
+    
+    def setup_keyboard_bindings(self):
+        # Bind arrow keys
+        self.root.bind('<Up>', lambda e: self.send_command("F"))
+        self.root.bind('<Left>', lambda e: self.send_command("L"))
+        self.root.bind('<Down>', lambda e: self.send_command("B"))
+        self.root.bind('<Right>', lambda e: self.send_command("R"))
+        
+        # Bind letter keys
+        self.root.bind('a', lambda e: self.send_command("A"))
+        self.root.bind('b', lambda e: self.send_command("B2"))
+        self.root.bind('c', lambda e: self.send_command("C"))
+        self.root.bind('d', lambda e: self.send_command("D"))
+        self.root.bind('e', lambda e: self.send_command("E"))
+        self.root.bind('f', lambda e: self.send_command("F2"))
+        self.root.bind('g', lambda e: self.send_command("G"))
+        self.root.bind('h', lambda e: self.send_command("H"))
+        self.root.bind('i', lambda e: self.send_command("I"))
+        self.root.bind('k', lambda e: self.send_command("K"))
+        self.root.bind('l', lambda e: self.send_command("L2"))
+        self.root.bind('m', lambda e: self.send_command("M"))
+        self.root.bind('n', lambda e: self.send_command("N"))
+        self.root.bind('o', lambda e: self.send_command("O"))
+        self.root.bind('p', lambda e: self.send_command("P"))
+        self.root.bind('q', lambda e: self.send_command("Q"))
+        self.root.bind('r', lambda e: self.send_command("R2"))
+        self.root.bind('s', lambda e: self.send_command("S"))
+        self.root.bind('t', lambda e: self.send_command("T"))
+        self.root.bind('u', lambda e: self.send_command("U"))
+        self.root.bind('v', lambda e: self.send_command("V"))
+        self.root.bind('w', lambda e: self.send_command("W"))
+        self.root.bind('x', lambda e: self.send_command("X"))
+        self.root.bind('y', lambda e: self.send_command("Y"))
+        self.root.bind('z', lambda e: self.send_command("Z"))
+        
+        # Bind uppercase letters too
+        self.root.bind('A', lambda e: self.send_command("A"))
+        self.root.bind('B', lambda e: self.send_command("B2"))
+        self.root.bind('C', lambda e: self.send_command("C"))
+        self.root.bind('D', lambda e: self.send_command("D"))
+        self.root.bind('E', lambda e: self.send_command("E"))
+        self.root.bind('F', lambda e: self.send_command("F2"))
+        self.root.bind('G', lambda e: self.send_command("G"))
+        self.root.bind('H', lambda e: self.send_command("H"))
+        self.root.bind('I', lambda e: self.send_command("I"))
+        self.root.bind('K', lambda e: self.send_command("K"))
+        self.root.bind('L', lambda e: self.send_command("L2"))
+        self.root.bind('M', lambda e: self.send_command("M"))
+        self.root.bind('N', lambda e: self.send_command("N"))
+        self.root.bind('O', lambda e: self.send_command("O"))
+        self.root.bind('P', lambda e: self.send_command("P"))
+        self.root.bind('Q', lambda e: self.send_command("Q"))
+        self.root.bind('R', lambda e: self.send_command("R2"))
+        self.root.bind('S', lambda e: self.send_command("S"))
+        self.root.bind('T', lambda e: self.send_command("T"))
+        self.root.bind('U', lambda e: self.send_command("U"))
+        self.root.bind('V', lambda e: self.send_command("V"))
+        self.root.bind('W', lambda e: self.send_command("W"))
+        self.root.bind('X', lambda e: self.send_command("X"))
+        self.root.bind('Y', lambda e: self.send_command("Y"))
+        self.root.bind('Z', lambda e: self.send_command("Z"))
+        
+        # Focus the window to receive key events
+        self.root.focus_set()
+    
+    def start_scanning(self):
+        """Start scanning for devices."""
+        self.update_status("Scanning for BLE devices...")
+        self.device_combobox.set('')
+        self.connect_button["state"] = tk.DISABLED
+        
+        def scan_completed(future):
+            try:
+                devices = future.result()
+                self.devices = [d for d in devices if d.name and ARDUINO_NAME in d.name]
+                
+                if self.devices:
+                    device_names = [f"{d.name} ({d.address})" for d in self.devices]
+                    self.device_combobox["values"] = device_names
+                    self.update_status(f"Found {len(self.devices)} BLE device(s)")
+                    self.connect_button["state"] = tk.NORMAL
+                else:
+                    self.update_status("No BLE devices found")
+                    self.connect_button["state"] = tk.DISABLED
+            except Exception as e:
+                self.update_status(f"Scan failed: {str(e)}")
+        
+        future = self.task_runner.run_task(self._scan_devices())
+        future.add_done_callback(scan_completed)
+    
+    async def _scan_devices(self):
+        """Async device scanning."""
+        scanner = BleakScanner()
+        return await scanner.discover(timeout=5.0)
+    
+    def update_status(self, message):
+        """Update the status label."""
+        self.status_label["text"] = message
+    
+    def update_received_data(self, message):
+        """Update the received data display."""
+        self.received_text.config(state=tk.NORMAL)
+        self.received_text.insert(tk.END, message + "\n")
+        self.received_text.see(tk.END)  # Auto-scroll to bottom
+        self.received_text.config(state=tk.DISABLED)
+    
+    def connect_to_device(self):
+        """Connect to the selected BLE device."""
+        selected_index = self.device_combobox.current()
+        if selected_index >= 0 and selected_index < len(self.devices):
+            self.selected_device = self.devices[selected_index]
+            
+            def connect_completed(future):
+                try:
+                    future.result()
+                    self.is_connected = True
+                    self.update_status(f"Connected to {self.selected_device.name}!")
+                    self.enable_controls(True)
+                    self.disconnect_button["state"] = tk.NORMAL
+                    self.root.focus_set()  # Regain focus after connection
+                except Exception as e:
+                    self.update_status(f"Connection failed: {str(e)}")
+                    self.connect_button["state"] = tk.NORMAL
+            
+            self.update_status(f"Connecting to {self.selected_device.name}...")
+            self.connect_button["state"] = tk.DISABLED
+            
+            future = self.task_runner.run_task(self._connect_async())
+            future.add_done_callback(connect_completed)
+    
+    async def _connect_async(self):
+        """Async connection handler."""
+        self.client = BleakClient(self.selected_device.address)
+        await self.client.connect()
+        await self.client.start_notify(CUSTOM_CHARACTERISTIC_UUID, self.notification_handler)
+    
+    def disconnect_from_device(self):
+        """Disconnect from the BLE device."""
+        def disconnect_completed(future):
+            try:
+                future.result()
+                self.is_connected = False
+                self.client = None
+                self.update_status("Disconnected")
+                self.enable_controls(False)
+                self.connect_button["state"] = tk.NORMAL
+                self.disconnect_button["state"] = tk.DISABLED
+            except Exception as e:
+                self.update_status(f"Disconnection error: {str(e)}")
+        
+        self.update_status(f"Disconnecting from {self.selected_device.name}...")
+        future = self.task_runner.run_task(self._disconnect_async())
+        future.add_done_callback(disconnect_completed)
+    
+    async def _disconnect_async(self):
+        """Async disconnection handler."""
+        if self.client and self.is_connected:
+            await self.client.stop_notify(CUSTOM_CHARACTERISTIC_UUID)
+            await self.client.disconnect()
+    
+    def enable_controls(self, enable):
+        """Enable or disable control buttons."""
+        state = tk.NORMAL if enable else tk.DISABLED
+        self.up_button["state"] = state
+        self.down_button["state"] = state
+        self.left_button["state"] = state
+        self.right_button["state"] = state
+        self.a_button["state"] = state
+        self.b_button["state"] = state
+        self.c_button["state"] = state
+        self.d_button["state"] = state
+        self.e_button["state"] = state
+        self.f_button["state"] = state
+        self.g_button["state"] = state
+        self.h_button["state"] = state
+        self.i_button["state"] = state
+        self.k_button["state"] = state
+        self.l_button["state"] = state
+        self.m_button["state"] = state
+        self.n_button["state"] = state
+        self.o_button["state"] = state
+        self.p_button["state"] = state
+        self.q_button["state"] = state
+        self.r_button["state"] = state
+        self.s_button["state"] = state
+        self.t_button["state"] = state
+        self.u_button["state"] = state
+        self.v_button["state"] = state
+        self.w_button["state"] = state
+        self.x_button["state"] = state
+        self.y_button["state"] = state
+        self.z_button["state"] = state
+    
+    def send_command(self, command):
+        """Send a command to the BLE device."""
+        def send_completed(future):
+            try:
+                future.result()
+                self.update_status(f"Sent command: {command}")
+            except Exception as e:
+                self.update_status(f"Error sending command: {str(e)}")
+        
+        if self.client and self.is_connected:
+            # Visual feedback for button presses
+            button_map = {
+                "F": self.up_button,
+                "L": self.left_button,
+                "B": self.down_button,
+                "R": self.right_button,
+                "A": self.a_button,
+                "B2": self.b_button,
+                "C": self.c_button,
+                "D": self.d_button,
+                "E": self.e_button,
+                "F2": self.f_button,
+                "G": self.g_button,
+                "H": self.h_button,
+                "I": self.i_button,
+                "K": self.k_button,
+                "L2": self.l_button,
+                "M": self.m_button,
+                "N": self.n_button,
+                "O": self.o_button,
+                "P": self.p_button,
+                "Q": self.q_button,
+                "R2": self.r_button,
+                "S": self.s_button,
+                "T": self.t_button,
+                "U": self.u_button,
+                "V": self.v_button,
+                "W": self.w_button,
+                "X": self.x_button,
+                "Y": self.y_button,
+                "Z": self.z_button
+            }
+            
+            if command in button_map:
+                button = button_map[command]
+                button.config(style='Pressed.TButton')
+                self.root.after(200, lambda: button.config(style='TButton'))
+            
+            future = self.task_runner.run_task(self._send_command_async(command))
+            future.add_done_callback(send_completed)
+    
+    async def _send_command_async(self, command):
+        """Async command sender."""
+        await self.client.write_gatt_char(CUSTOM_CHARACTERISTIC_UUID, command.encode())
+    
+    def notification_handler(self, sender, data):
+        """Handle incoming notifications from the BLE device - prints entire string as-is"""
+        try:
+            message = data.decode('utf-8').strip()
+            self.root.after(0, lambda: self.update_received_data(f"Received: {message}"))
+        except UnicodeDecodeError:
+            hex_data = data.hex()
+            self.root.after(0, lambda: self.update_received_data(f"Received raw data: {hex_data}"))
+    
+    def on_close(self):
+        """Handle window close event."""
+        if self.is_connected:
+            self.task_runner.run_task(self._disconnect_async())
+        self.task_runner.loop.call_soon_threadsafe(self.task_runner.loop.stop)
+        self.root.destroy()
+
+def main():
+    root = tk.Tk()
+    root.geometry("600x1000")  # Adjusted size to accommodate more buttons
+    
+    # Create a style for pressed buttons
+    style = ttk.Style()
+    style.configure('Pressed.TButton', foreground='white', background='green')
+    
+    dashboard = BLEDashboard(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
