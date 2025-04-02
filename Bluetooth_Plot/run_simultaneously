@@ -1,0 +1,7 @@
+import subprocess
+
+p1 = subprocess.Popen(['python', 'plotter.py'])
+p2 = subprocess.Popen(['python', 'bluetooth_connect2laptop.py'])
+
+p1.wait()
+p2.wait()
