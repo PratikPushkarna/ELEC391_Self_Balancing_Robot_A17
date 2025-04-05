@@ -48,6 +48,7 @@ float prev_degacc=0; //previous acceleration angle
 float filter_angle = 0; // angle change within which weights kg2 are used and outside it  kg is used
 int noresponse_flag = 0; // if flag==1 then result =0 within no response angle
 
+
 // values that work somwhat  kp = 31-32(31.5), kd = 4-5 (4.16), ki=0 ; 
 
 //Global Varibles for the PID
@@ -56,14 +57,14 @@ float ki = 0;
 float kd = 0;
 float derivative;
 float kf = 0;  //encoder rpm weight
-int Max_PID = 255;
+int Max_PWM = 255;
 int result=0;
 float new_error = 0;
 float prev_error = 0;
 float ki_angle=0; // angle within which integral = 0
 float noresponse_angle=0; //angle within which pwm = 0
-float maxintegral = 300; // max value which the integral is constrained to
-
+float maxintegral = 200; // max value which the integral is constrained to
+float rightwheel_gain = 0.9;
 
 unsigned long previous_T = 0;
 float integral = 0;
@@ -156,23 +157,27 @@ void loop() {
         new_error = degt - (wanted_angle + targetOffset);
 
         //P = Kp * Error;
-        integral += ki * new_error * deltaTime;
+        integral +=  new_error * deltaTime;
         integral = constrain(integral, -maxintegral, maxintegral);
         
-
+        if (new_error < ki_angle && new_error > -ki_angle ){
+            integral = 0;
+        }
 
         derivative = kd * (new_error - prev_error) / deltaTime;
 
-        result = kp*new_error + integral + derivative;
+        result = kp*new_error + ki*integral + derivative;
 
-
+        if (new_error < noresponse_angle && new_error > -noresponse_angle){
+          result = 0;
+        }
 
         // Adjust each wheel speed
         int leftSpeed = result + turnOffset;
-        int rightSpeed = result - turnOffset;
+        int rightSpeed = result*rightwheel_gain - turnOffset;
 
-        leftSpeed = constrain(leftSpeed, -255, 255);
-        rightSpeed = constrain(rightSpeed, -255, 255);
+        leftSpeed = constrain(leftSpeed, -Max_PWM, Max_PWM);
+        rightSpeed = constrain(rightSpeed, -Max_PWM, Max_PWM);
 
         // Apply to motors
         setMotor(left_1, left_2, leftSpeed);
@@ -309,13 +314,13 @@ void loop() {
 
         else if (strcmp(receivedString, "Q") == 0) {                                   //Change Folder button pressed
 
-          Max_PID = Max_PID + 5;
+          Max_PWM = Max_PWM + 5;
 
-          if(Max_PID>255){
-            Max_PID = 0;
+          if(Max_PWM>255){
+            Max_PWM = 0;
           }
 
-          sprintf(sendbuffer,"PWM: %d",Max_PID);
+          sprintf(sendbuffer,"PWM: %d",Max_PWM);
           customCharacteristic.writeValue(sendbuffer); 
         }
 
@@ -383,9 +388,26 @@ void loop() {
 
         else if (strcmp(receivedString, "NUM1") == 0) {                                   //Change Folder button pressed
 
-          Max_PID = Max_PID - 5;
-          sprintf(sendbuffer,"pwm: %d",Max_PID);
+          Max_PWM = Max_PWM - 5;
+          sprintf(sendbuffer,"pwm: %d",Max_PWM);
           customCharacteristic.writeValue(sendbuffer);    
+
+        }
+
+        else if (strcmp(receivedString, "NUM5") == 0) {                                   //Change Folder button pressed
+
+          rightwheel_gain = rightwheel_gain + 0.01;
+          sprintf(sendbuffer,"lwg: %.2f",rightwheel_gain);
+          customCharacteristic.writeValue(sendbuffer);    
+
+        }
+
+        
+        else if (strcmp(receivedString, "NUM6") == 0) {                                   //Change Folder button pressed
+
+          rightwheel_gain = rightwheel_gain - 0.01;
+          sprintf(sendbuffer,"lwg: %.2f",rightwheel_gain);
+          customCharacteristic.writeValue(sendbuffer);  
 
         }
 
