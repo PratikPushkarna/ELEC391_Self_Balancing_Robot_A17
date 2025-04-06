@@ -1,0 +1,443 @@
+import asyncio
+from bleak import BleakScanner, BleakClient
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox
+from threading import Thread
+
+ARDUINO_NAME = "BLE"
+CUSTOM_SERVICE_UUID = "00000000-5EC4-4083-81CD-A10B8D5CF6EC"
+CUSTOM_CHARACTERISTIC_UUID = "00000001-5EC4-4083-81CD-A10B8D5CF6EC"
+
+class AsyncTaskRunner:
+    def __init__(self):
+        self.loop = asyncio.new_event_loop()
+        self.thread = Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+    
+    def _run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+    
+    def run_task(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+class BLEDashboard:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Advanced BLE Controller")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        # BLE variables
+        self.client = None
+        self.devices = []
+        self.selected_device = None
+        self.is_connected = False
+        self.sonar_enabled = False
+        self.task_runner = AsyncTaskRunner()
+        
+        # PID variables
+        self.kp = 0.0
+        self.kd = 0.0
+        self.ki = 0.0
+        self.target_angle = 0.0
+        
+        # Create UI
+        self.create_ui()
+        
+        # Bind keyboard events
+        self.setup_keyboard_bindings()
+        
+        # Start scanning
+        self.start_scanning()
+    
+    def create_ui(self):
+        # Main container
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Left panel (Connection and Movement)
+        left_panel = ttk.Frame(main_frame)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Right panel (PID and Sensors)
+        right_panel = ttk.Frame(main_frame)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        # Connection frame
+        self.create_connection_frame(left_panel)
+        
+        # Movement frame
+        self.create_movement_frame(left_panel)
+        
+        # Servo and Sensors frame
+        self.create_servo_sensor_frame(left_panel)
+        
+        # PID Control frame
+        self.create_pid_frame(right_panel)
+        
+        # Received data frame
+        self.create_received_data_frame(right_panel)
+    
+    def create_connection_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="Connection", padding=10)
+        frame.pack(fill=tk.X, pady=5)
+        
+        self.status_label = ttk.Label(frame, text="Initializing...")
+        self.status_label.pack(fill=tk.X)
+        
+        self.device_combobox = ttk.Combobox(frame, state="readonly")
+        self.device_combobox.pack(fill=tk.X, pady=5)
+        
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X)
+        
+        self.connect_button = ttk.Button(
+            btn_frame, text="Connect", command=self.connect_to_device, state=tk.DISABLED)
+        self.connect_button.pack(side=tk.LEFT, expand=True)
+        
+        self.disconnect_button = ttk.Button(
+            btn_frame, text="Disconnect", command=self.disconnect_from_device, state=tk.DISABLED)
+        self.disconnect_button.pack(side=tk.LEFT, expand=True)
+        
+        self.refresh_button = ttk.Button(
+            btn_frame, text="Refresh", command=self.start_scanning)
+        self.refresh_button.pack(side=tk.LEFT, expand=True)
+    
+    def create_movement_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="Movement Control", padding=10)
+        frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # 8-directional movement buttons
+        dir_frame = ttk.Frame(frame)
+        dir_frame.pack(pady=5)
+        
+        # First row (Forward Left, Forward, Forward Right)
+        row1 = ttk.Frame(dir_frame)
+        row1.pack()
+        
+        self.fl_button = self.create_direction_button(row1, "↖ FL", "FL", 0, 0)
+        self.f_button = self.create_direction_button(row1, "↑ F", "F", 0, 1)
+        self.fr_button = self.create_direction_button(row1, "↗ FR", "FR", 0, 2)
+        
+        # Second row (Left, Stop, Right)
+        row2 = ttk.Frame(dir_frame)
+        row2.pack()
+        
+        self.l_button = self.create_direction_button(row2, "← L", "L", 1, 0)
+        self.stop_button = self.create_direction_button(row2, "■ STOP", "S", 1, 1)
+        self.r_button = self.create_direction_button(row2, "→ R", "R", 1, 2)
+        
+        # Third row (Back Left, Back, Back Right)
+        row3 = ttk.Frame(dir_frame)
+        row3.pack()
+        
+        self.bl_button = self.create_direction_button(row3, "↙ BL", "BL", 2, 0)
+        self.b_button = self.create_direction_button(row3, "↓ B", "B", 2, 1)
+        self.br_button = self.create_direction_button(row3, "↘ BR", "BR", 2, 2)
+    
+    def create_direction_button(self, parent, text, command, row, col):
+        btn = ttk.Button(
+            parent, 
+            text=text, 
+            command=lambda: self.send_command(command),
+            state=tk.DISABLED,
+            width=8
+        )
+        btn.grid(row=row, column=col, padx=2, pady=2)
+        return btn
+    
+    def create_servo_sensor_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="Servo & Sensors", padding=10)
+        frame.pack(fill=tk.X, pady=5)
+        
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+        
+        self.t1_button = ttk.Button(
+            btn_frame, text="Turn Left (T1)", 
+            command=lambda: self.send_command("T1"), state=tk.DISABLED)
+        self.t1_button.pack(side=tk.LEFT, expand=True)
+        
+        self.t2_button = ttk.Button(
+            btn_frame, text="Turn Right (T2)", 
+            command=lambda: self.send_command("T2"), state=tk.DISABLED)
+        self.t2_button.pack(side=tk.LEFT, expand=True)
+        
+        self.distance_button = ttk.Button(
+            btn_frame, text="Get Distance", 
+            command=lambda: self.send_command("DIST"), state=tk.DISABLED)
+        self.distance_button.pack(side=tk.LEFT, expand=True)
+        
+        self.sonar_button = ttk.Button(
+            frame, text="Enable Sonar", 
+            command=self.toggle_sonar, state=tk.DISABLED)
+        self.sonar_button.pack(fill=tk.X, pady=5)
+    
+    def create_pid_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="PID Tuning", padding=10)
+        frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # KP controls
+        kp_frame = ttk.LabelFrame(frame, text="Proportional (Kp)", padding=5)
+        kp_frame.pack(fill=tk.X, pady=2)
+        
+        self.create_pid_control(kp_frame, "Kp", 0.1, 1.0, 0.01, 0.1, "KP")
+        
+        # KD controls
+        kd_frame = ttk.LabelFrame(frame, text="Derivative (Kd)", padding=5)
+        kd_frame.pack(fill=tk.X, pady=2)
+        
+        self.create_pid_control(kd_frame, "Kd", 0.01, 0.1, 0.001, 0.01, "KD")
+        
+        # KI controls
+        ki_frame = ttk.LabelFrame(frame, text="Integral (Ki)", padding=5)
+        ki_frame.pack(fill=tk.X, pady=2)
+        
+        self.create_pid_control(ki_frame, "Ki", 1.0, 10.0, 1.0, 5.0, "KI")
+        
+        # Target Angle controls
+        angle_frame = ttk.LabelFrame(frame, text="Target Angle", padding=5)
+        angle_frame.pack(fill=tk.X, pady=2)
+        
+        self.create_pid_control(angle_frame, "Angle", 0.5, 5.0, 0.1, 1.0, "ANGLE")
+    
+    def create_pid_control(self, parent, label, small_inc, large_inc, small_dec, large_dec, prefix):
+        label_frame = ttk.Frame(parent)
+        label_frame.pack(fill=tk.X)
+        
+        ttk.Label(label_frame, text=label, width=8).pack(side=tk.LEFT)
+        
+        btn_frame = ttk.Frame(label_frame)
+        btn_frame.pack(side=tk.RIGHT)
+        
+        ttk.Button(btn_frame, text=f"-{large_dec}", 
+                  command=lambda: self.send_command(f"{prefix}-{large_dec}"),
+                  state=tk.DISABLED, width=6).pack(side=tk.LEFT, padx=1)
+        ttk.Button(btn_frame, text=f"-{small_dec}", 
+                  command=lambda: self.send_command(f"{prefix}-{small_dec}"),
+                  state=tk.DISABLED, width=6).pack(side=tk.LEFT, padx=1)
+        ttk.Button(btn_frame, text=f"+{small_inc}", 
+                  command=lambda: self.send_command(f"{prefix}+{small_inc}"),
+                  state=tk.DISABLED, width=6).pack(side=tk.LEFT, padx=1)
+        ttk.Button(btn_frame, text=f"+{large_inc}", 
+                  command=lambda: self.send_command(f"{prefix}+{large_inc}"),
+                  state=tk.DISABLED, width=6).pack(side=tk.LEFT, padx=1)
+    
+    def create_received_data_frame(self, parent):
+        frame = ttk.LabelFrame(parent, text="Received Data", padding=10)
+        frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        self.received_text = scrolledtext.ScrolledText(
+            frame, height=10, wrap=tk.WORD, state=tk.DISABLED)
+        self.received_text.pack(fill=tk.BOTH, expand=True)
+        
+        clear_btn = ttk.Button(
+            frame, text="Clear", command=self.clear_received_data)
+        clear_btn.pack(side=tk.RIGHT, pady=5)
+    
+    def setup_keyboard_bindings(self):
+        # Movement keys
+        self.root.bind('w', lambda e: self.send_command("F"))
+        self.root.bind('e', lambda e: self.send_command("FR"))
+        self.root.bind('d', lambda e: self.send_command("R"))
+        self.root.bind('c', lambda e: self.send_command("BR"))
+        self.root.bind('x', lambda e: self.send_command("B"))
+        self.root.bind('z', lambda e: self.send_command("BL"))
+        self.root.bind('a', lambda e: self.send_command("L"))
+        self.root.bind('q', lambda e: self.send_command("FL"))
+        self.root.bind('s', lambda e: self.send_command("S"))
+        
+        # Servo keys
+        self.root.bind('j', lambda e: self.send_command("T1"))
+        self.root.bind('l', lambda e: self.send_command("T2"))
+        
+        # Distance key
+        self.root.bind('r', lambda e: self.send_command("DIST"))
+        
+        # Sonar toggle
+        self.root.bind('t', lambda e: self.toggle_sonar())
+        
+        # Focus the window
+        self.root.focus_set()
+    
+    def toggle_sonar(self):
+        self.sonar_enabled = not self.sonar_enabled
+        command = "SONAR_ON" if self.sonar_enabled else "SONAR_OFF"
+        self.sonar_button.config(text="Disable Sonar" if self.sonar_enabled else "Enable Sonar")
+        self.send_command(command)
+    
+    def clear_received_data(self):
+        self.received_text.config(state=tk.NORMAL)
+        self.received_text.delete(1.0, tk.END)
+        self.received_text.config(state=tk.DISABLED)
+    
+    def update_status(self, message):
+        self.status_label["text"] = message
+    
+    def update_received_data(self, message):
+        self.received_text.config(state=tk.NORMAL)
+        self.received_text.insert(tk.END, message + "\n")
+        self.received_text.see(tk.END)
+        self.received_text.config(state=tk.DISABLED)
+    
+    def start_scanning(self):
+        self.update_status("Scanning for BLE devices...")
+        self.device_combobox.set('')
+        self.connect_button["state"] = tk.DISABLED
+        
+        def scan_completed(future):
+            try:
+                devices = future.result()
+                self.devices = [d for d in devices if d.name and ARDUINO_NAME in d.name]
+                
+                if self.devices:
+                    device_names = [f"{d.name} ({d.address})" for d in self.devices]
+                    self.device_combobox["values"] = device_names
+                    self.update_status(f"Found {len(self.devices)} BLE device(s)")
+                    self.connect_button["state"] = tk.NORMAL
+                else:
+                    self.update_status("No BLE devices found")
+            except Exception as e:
+                self.update_status(f"Scan failed: {str(e)}")
+        
+        future = self.task_runner.run_task(self._scan_devices())
+        future.add_done_callback(scan_completed)
+    
+    async def _scan_devices(self):
+        scanner = BleakScanner()
+        return await scanner.discover(timeout=5.0)
+    
+    def connect_to_device(self):
+        selected_index = self.device_combobox.current()
+        if selected_index >= 0 and selected_index < len(self.devices):
+            self.selected_device = self.devices[selected_index]
+            
+            def connect_completed(future):
+                try:
+                    future.result()
+                    self.is_connected = True
+                    self.update_status(f"Connected to {self.selected_device.name}!")
+                    self.enable_controls(True)
+                    self.disconnect_button["state"] = tk.NORMAL
+                    self.root.focus_set()
+                except Exception as e:
+                    self.update_status(f"Connection failed: {str(e)}")
+                    self.connect_button["state"] = tk.NORMAL
+            
+            self.update_status(f"Connecting to {self.selected_device.name}...")
+            self.connect_button["state"] = tk.DISABLED
+            
+            future = self.task_runner.run_task(self._connect_async())
+            future.add_done_callback(connect_completed)
+    
+    async def _connect_async(self):
+        self.client = BleakClient(self.selected_device.address)
+        await self.client.connect()
+        await self.client.start_notify(CUSTOM_CHARACTERISTIC_UUID, self.notification_handler)
+    
+    def disconnect_from_device(self):
+        def disconnect_completed(future):
+            try:
+                future.result()
+                self.is_connected = False
+                self.client = None
+                self.update_status("Disconnected")
+                self.enable_controls(False)
+                self.connect_button["state"] = tk.NORMAL
+                self.disconnect_button["state"] = tk.DISABLED
+            except Exception as e:
+                self.update_status(f"Disconnection error: {str(e)}")
+        
+        self.update_status(f"Disconnecting from {self.selected_device.name}...")
+        future = self.task_runner.run_task(self._disconnect_async())
+        future.add_done_callback(disconnect_completed)
+    
+    async def _disconnect_async(self):
+        if self.client and self.is_connected:
+            await self.client.stop_notify(CUSTOM_CHARACTERISTIC_UUID)
+            await self.client.disconnect()
+    
+    def enable_controls(self, enable):
+        state = tk.NORMAL if enable else tk.DISABLED
+        
+        # Movement buttons
+        self.f_button["state"] = state
+        self.fr_button["state"] = state
+        self.r_button["state"] = state
+        self.br_button["state"] = state
+        self.b_button["state"] = state
+        self.bl_button["state"] = state
+        self.l_button["state"] = state
+        self.fl_button["state"] = state
+        self.stop_button["state"] = state
+        
+        # Servo and sensor buttons
+        self.t1_button["state"] = state
+        self.t2_button["state"] = state
+        self.distance_button["state"] = state
+        self.sonar_button["state"] = state
+        
+        # Enable all PID buttons
+        for child in self.root.winfo_children():
+            if isinstance(child, ttk.LabelFrame) and "PID" in child["text"]:
+                for subchild in child.winfo_children():
+                    if isinstance(subchild, ttk.Frame):
+                        for btn in subchild.winfo_children():
+                            if isinstance(btn, ttk.Button):
+                                btn["state"] = state
+    
+    def send_command(self, command):
+        def send_completed(future):
+            try:
+                future.result()
+                self.update_status(f"Sent command: {command}")
+            except Exception as e:
+                self.update_status(f"Error sending command: {str(e)}")
+        
+        if self.client and self.is_connected:
+            # Visual feedback
+            button_map = {
+                "F": self.f_button, "FR": self.fr_button, "R": self.r_button,
+                "BR": self.br_button, "B": self.b_button, "BL": self.bl_button,
+                "L": self.l_button, "FL": self.fl_button, "S": self.stop_button,
+                "T1": self.t1_button, "T2": self.t2_button, "DIST": self.distance_button
+            }
+            
+            if command in button_map:
+                button = button_map[command]
+                button.config(style='Pressed.TButton')
+                self.root.after(200, lambda: button.config(style='TButton'))
+            
+            future = self.task_runner.run_task(self._send_command_async(command))
+            future.add_done_callback(send_completed)
+    
+    async def _send_command_async(self, command):
+        await self.client.write_gatt_char(CUSTOM_CHARACTERISTIC_UUID, command.encode())
+    
+    def notification_handler(self, sender, data):
+        try:
+            message = data.decode('utf-8').strip()
+            self.root.after(0, lambda: self.update_received_data(f"Received: {message}"))
+        except UnicodeDecodeError:
+            hex_data = data.hex()
+            self.root.after(0, lambda: self.update_received_data(f"Received raw data: {hex_data}"))
+    
+    def on_close(self):
+        if self.is_connected:
+            self.task_runner.run_task(self._disconnect_async())
+        self.task_runner.loop.call_soon_threadsafe(self.task_runner.loop.stop)
+        self.root.destroy()
+
+def main():
+    root = tk.Tk()
+    root.geometry("1000x800")
+    
+    # Create a style for pressed buttons
+    style = ttk.Style()
+    style.configure('Pressed.TButton', foreground='white', background='green')
+    
+    dashboard = BLEDashboard(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
